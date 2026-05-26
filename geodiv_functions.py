@@ -27,11 +27,51 @@ from adjustText import adjust_text
 
 # refer to https://en.wikipedia.org/wiki/Spatial_weight_matrix#/media/File:Chess_connectivity.svg for different neighborhood types
 
-def get_neighborhood_kernels():
+def radius_ball_kernel(radius=3, sigma=None, normalize=True):
+    """
+    Create a 3D isotropic, distance-weighted spherical neighborhood kernel.
+    
+    Parameters
+    ----------
+    radius : int
+        Radius of the neighborhood (in voxels).
+    sigma : float or None
+        Standard deviation for Gaussian weighting. If None, sigma = radius / 2.
+    normalize : bool
+        If True, normalize weights to sum to 1.
+    """
+    if sigma is None:
+        sigma = radius / 2.0
+
+    size = 2 * radius + 1
+    center = radius
+
+    k = np.zeros((size, size, size), dtype=float)
+
+    for i in range(size):
+        for j in range(size):
+            for l in range(size):
+                dx = i - center
+                dy = j - center
+                dz = l - center
+                d = np.sqrt(dx*dx + dy*dy + dz*dz)
+
+                if 0 < d <= radius:
+                    k[i, j, l] = np.exp(-(d*d) / (2.0 * sigma * sigma))
+
+    if normalize and k.sum() > 0:
+        k /= k.sum()
+
+    return k
+
+
+def get_neighborhood_kernels(normalize=True, radius_ball=3):
     """Returns a dictionary of kernels for different neighborhood scales."""
     # 6-node (Rook)
     k6 = np.zeros((3, 3, 3))
     k6[1,1,0] = k6[1,1,2] = k6[1,0,1] = k6[1,2,1] = k6[0,1,1] = k6[2,1,1] = 1
+    if normalize:
+        k6 /= k6.sum()
     
     # 18-node (Face + Edge)
     k18 = np.ones((3, 3, 3))
@@ -41,21 +81,32 @@ def get_neighborhood_kernels():
             for k in [0, 2]:
                 k18[i, j, k] = 0
     k18[1, 1, 1] = 0 # Remove center
+    if normalize:
+        k18 /= k18.sum()
     
     # 26-node (Queen)
     k26 = np.ones((3, 3, 3))
     k26[1, 1, 1] = 0
+    if normalize:
+        k26 /= k26.sum()
     
     # 2-ring (5x5x5 cube)
     k124 = np.ones((5, 5, 5))
     k124[2, 2, 2] = 0
+    if normalize:
+        k124 /= k124.sum()
+
+    # Radius-3 distance-weighted spherical kernel
+    k_r3 = radius_ball_kernel(radius=radius_ball, sigma=None, normalize=normalize)
     
     return {
         "moran_6": k6,
         "moran_18": k18,
         "moran_26": k26,
-        "moran_2ring": k124
+        "moran_2ring": k124,
+        "moran_r3": k_r3
     }
+
 
 # this function calculates Moran's I for a given 3D model and a specified neighborhood kernel. It uses FFT-based convolution for efficiency, especially with larger kernels.
 def calculate_moran_i(model_3d, kernel):
